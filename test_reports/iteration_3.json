@@ -1,0 +1,33 @@
+{
+  "summary": "Backend-only verification of Super Admin IMPERSONATION feature. 15/15 pytest cases pass covering start/stop, 404/403 auth boundaries, data scoping (facilities/emissions/dashboard), audit trail, route ordering (/stop vs /{cid}), role forcing to 'admin' (bypass supervisor block), and admin endpoint access preserved during impersonation.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter3_impersonation.py",
+    "/app/test_reports/pytest/iter3_impersonation.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is 1264 lines — approaching split threshold (>700). Consider modularising auth/admin/emissions into separate routers.",
+    "get_current_user reads impersonating_company_id but does NOT re-check that the impersonated company still exists on every request. If the target company is deleted mid-session, subsequent requests silently scope to a ghost company_id. Add existence check or auto-clear on 404.",
+    "stop_impersonate does not require is_super_admin — any user can call it (no-op if their session has no imp flag). Low risk but tighten with `if not user.is_super_admin: raise 403` for consistency.",
+    "During impersonation the User model exposes role='admin' but user.email/user_id remain the super admin's — audit logs will attribute actions to the super's user_id, which is correct, but ensure UI/reporting is not confused (facility.create audit under impersonation will show super's user_id acting on target company_id — good for forensics)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter3_impersonation.py"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "not tested"},
+  "test_credentials": "Uses seeded session tokens from /app/memory/test_credentials.md (test_session_karbon_super_1, _admin_1, _staff_1, _sup_1) against co_test_karbon_1.",
+  "seed_data_creation": "Test auto-creates a facility in co_test_karbon_1 only if none exist (cleaned up after). Emission log created in period 2029/11 during impersonation, cleaned up via /admin/emissions/{lid}.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Impersonation tests must run sequentially (-n0) — all use the shared super-admin session token and mutate impersonating_company_id on that single session doc. Autouse fixture stops impersonation before/after each test. If you add more super-admin tests, either reuse this file or ensure /admin/impersonate/stop is called in teardown to avoid contaminating other tests that expect super's real company scope.",
+  "rca of the issue": "N/A — all target behaviours pass. Two initial failures were caused by (a) xdist parallel execution racing on the shared session token and (b) empty co_test_karbon_1 facilities list; both fixed in test setup, not in product code."
+}

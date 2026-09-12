@@ -1,7 +1,8 @@
 import React from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/AuthContext";
-import { House, Buildings, ChartLine, ClipboardText, CheckCircle, FileArrowDown, Users, Notepad, Leaf, SignOut, Shield, Database, ChartPie } from "@phosphor-icons/react";
+import { api } from "@/lib/api";
+import { House, Buildings, ChartLine, ClipboardText, CheckCircle, FileArrowDown, Users, Notepad, Leaf, SignOut, Shield, Database, ChartPie, SignOut as ExitIcon, ArrowUUpLeft } from "@phosphor-icons/react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
@@ -22,14 +23,31 @@ const ADMIN_NAV = [
 ];
 
 export default function AppLayout({ children }) {
-  const { user, company, logout } = useAuth();
+  const { user, company, impersonating, logout, refresh } = useAuth();
   const nav = useNavigate();
   const superOnly = user?.is_super_admin && !company;
-  const items = superOnly ? [] : NAV.filter(n => n.roles.includes(user?.role) || user?.is_super_admin);
+  const items = superOnly ? [] : NAV.filter(n => n.roles.includes(user?.role) || (user?.is_super_admin && !impersonating));
   const homeUrl = superOnly ? "/admin" : "/dashboard";
 
+  const stopImpersonate = async () => {
+    try { await api.post("/admin/impersonate/stop"); await refresh(); nav("/admin"); }
+    catch {}
+  };
+
   return (
-    <div className="min-h-screen flex bg-background">
+    <div className="min-h-screen flex flex-col bg-background">
+      {impersonating && (
+        <div className="bg-amber-100 border-b-2 border-amber-400 text-amber-900 px-4 py-2.5 flex items-center justify-between text-sm" data-testid="impersonation-banner">
+          <div className="flex items-center gap-2">
+            <Shield size={16} weight="fill" className="text-amber-700"/>
+            <span>Mode Impersonasi aktif — Anda sedang berperan sebagai <b>Admin {company?.name}</b>.</span>
+          </div>
+          <button onClick={stopImpersonate} className="flex items-center gap-1 px-3 py-1 rounded bg-amber-800 text-white hover:bg-amber-900 text-xs font-semibold" data-testid="stop-impersonate-btn">
+            <ArrowUUpLeft size={13}/> Keluar Mode
+          </button>
+        </div>
+      )}
+      <div className="flex flex-1 min-h-0">
       <aside className="w-64 border-r border-border bg-card hidden md:flex flex-col">
         <div className="p-5 border-b border-border">
           <div className="flex items-center gap-2 cursor-pointer" onClick={()=>nav(homeUrl)}>
@@ -45,6 +63,7 @@ export default function AppLayout({ children }) {
             <>
               <div className="mt-3 text-xs uppercase tracking-wider text-muted-foreground">Perusahaan</div>
               <div className="font-semibold truncate" data-testid="sidebar-company-name">{company?.name}</div>
+              {impersonating && <div className="text-[10px] text-amber-700 mt-0.5">via Impersonasi Super Admin</div>}
             </>
           )}
         </div>
@@ -99,6 +118,7 @@ export default function AppLayout({ children }) {
         </div>
         {children}
       </main>
+      </div>
     </div>
   );
 }

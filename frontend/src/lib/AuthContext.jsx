@@ -6,6 +6,7 @@ const AuthCtx = createContext(null);
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [company, setCompany] = useState(null);
+  const [impersonating, setImpersonating] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
@@ -13,9 +14,10 @@ export function AuthProvider({ children }) {
       const { data } = await api.get("/auth/me");
       setUser(data.user);
       setCompany(data.company);
+      setImpersonating(data.impersonating);
       return data;
     } catch {
-      setUser(null); setCompany(null);
+      setUser(null); setCompany(null); setImpersonating(false);
       return null;
     } finally {
       setLoading(false);
@@ -38,7 +40,7 @@ export function AuthProvider({ children }) {
   };
 
   return (
-    <AuthCtx.Provider value={{ user, company, loading, refresh, logout, setUser, setCompany }}>
+    <AuthCtx.Provider value={{ user, company, impersonating, loading, refresh, logout, setUser, setCompany }}>
       {children}
     </AuthCtx.Provider>
   );

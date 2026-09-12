@@ -10,8 +10,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { api } from "@/lib/api";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend } from "recharts";
 import { useNavigate } from "react-router-dom";
-import { Buildings, Plus, Trash, PencilSimple } from "@phosphor-icons/react";
+import { Buildings, Plus, Trash, PencilSimple, UserSwitch } from "@phosphor-icons/react";
 import { toast } from "sonner";
+import { useAuth } from "@/lib/AuthContext";
 
 const SCOPE = { 1:"#e07a5f", 2:"#8ecae6", 3:"#52796f" };
 const STATUS = {
@@ -26,6 +27,7 @@ const emptyForm = { name:"", industry:"", size:"", region:"jamali", org_boundary
 
 export default function AdminDashboard() {
   const nav = useNavigate();
+  const { refresh } = useAuth();
   const [stats, setStats] = useState(null);
   const [companies, setCompanies] = useState([]);
   const [meta, setMeta] = useState({ industries: [], sizes: [], regions: [] });
@@ -60,6 +62,14 @@ export default function AdminDashboard() {
     if (!window.confirm(`Hapus perusahaan "${c.name}" beserta seluruh datanya?`)) return;
     try { await api.delete(`/admin/companies/${c.company_id}`); toast.success("Perusahaan dihapus"); load(); }
     catch(e) { toast.error(e?.response?.data?.detail || "Gagal"); }
+  };
+  const impersonate = async (c) => {
+    try {
+      await api.post(`/admin/impersonate/${c.company_id}`);
+      await refresh();
+      toast.success(`Sekarang berperan sebagai admin ${c.name}`);
+      nav("/dashboard");
+    } catch(e) { toast.error(e?.response?.data?.detail || "Gagal impersonasi"); }
   };
 
   if (!stats) return <div className="p-8 text-muted-foreground">Memuat...</div>;
@@ -170,6 +180,9 @@ export default function AdminDashboard() {
                   <TableCell className="text-right font-medium">{c.total_tco2e.toLocaleString('id-ID')}</TableCell>
                   <TableCell><Badge {...(st.variant?{variant:st.variant}:{})} className={st.cls}>{st.label}</Badge></TableCell>
                   <TableCell className="flex gap-1 justify-end">
+                    <Button size="sm" variant="ghost" onClick={()=>impersonate(c)} data-testid={`co-impersonate-${c.company_id}`} title="Masuk sebagai Admin">
+                      <UserSwitch size={14}/> Masuk
+                    </Button>
                     <Button size="sm" variant="ghost" onClick={()=>nav(`/admin/companies/${c.company_id}`)}>Buka</Button>
                     <Button size="sm" variant="ghost" onClick={()=>openEdit(c)} data-testid={`co-edit-${c.company_id}`}><PencilSimple size={14}/></Button>
                     <Button size="sm" variant="ghost" onClick={()=>del(c)} data-testid={`co-del-${c.company_id}`}><Trash size={14} className="text-destructive"/></Button>

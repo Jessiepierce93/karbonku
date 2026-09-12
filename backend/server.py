@@ -125,6 +125,8 @@ class User(BaseModel):
     role: str = "admin"  # admin | staff | supervisor
     is_super_admin: bool = False
     created_at: str
+    impersonating_company_id: Optional[str] = None
+    real_company_id: Optional[str] = None
 
 class Facility(BaseModel):
     facility_id: str
@@ -245,6 +247,13 @@ async def get_current_user(request: Request) -> User:
     user_doc = await db.users.find_one({"user_id": session["user_id"]}, {"_id":0})
     if not user_doc:
         raise HTTPException(401, "User not found")
+    # Impersonation override — only when super admin
+    imp_cid = session.get("impersonating_company_id")
+    if imp_cid and user_doc.get("is_super_admin"):
+        user_doc["real_company_id"] = user_doc.get("company_id")
+        user_doc["company_id"] = imp_cid
+        user_doc["role"] = "admin"
+        user_doc["impersonating_company_id"] = imp_cid
     return User(**user_doc)
 
 async def require_company(user: User = Depends(get_current_user)):
@@ -323,7 +332,32 @@ async def me(user: User = Depends(get_current_user)):
     company = None
     if user.company_id:
         company = await db.companies.find_one({"company_id": user.company_id}, {"_id":0})
-    return {"user": user.model_dump(), "company": company}
+    return {"user": user.model_dump(), "company": company,
+            "impersonating": bool(user.impersonating_company_id)}
+
+@api.post("/admin/impersonate/stop")
+async def stop_impersonate(request: Request, user: User = Depends(get_current_user)):
+    token = request.cookies.get("session_token") or request.headers.get("Authorization","").replace("Bearer ","")
+    session = await db.user_sessions.find_one({"session_token": token}, {"_id":0})
+    imp = session.get("impersonating_company_id") if session else None
+    await db.user_sessions.update_one({"session_token": token},
+                                      {"$unset": {"impersonating_company_id": ""}})
+    if imp:
+        await audit(user.user_id, imp, "admin.impersonate.stop", {})
+    return {"ok": True}
+
+@api.post("/admin/impersonate/{cid}")
+async def impersonate(cid: str, request: Request, user: User = Depends(get_current_user)):
+    if not user.is_super_admin:
+        raise HTTPException(403, "Super Admin only")
+    target = await db.companies.find_one({"company_id": cid}, {"_id":0})
+    if not target:
+        raise HTTPException(404, "Perusahaan tidak ditemukan")
+    token = request.cookies.get("session_token") or request.headers.get("Authorization","").replace("Bearer ","")
+    await db.user_sessions.update_one({"session_token": token},
+                                      {"$set": {"impersonating_company_id": cid}})
+    await audit(user.user_id, cid, "admin.impersonate.start", {"company": target.get("name")})
+    return {"ok": True, "company": target}
 
 @api.post("/auth/logout")
 async def logout(request: Request, response: Response):
