@@ -24,18 +24,29 @@ const ADMIN_NAV = [
 export default function AppLayout({ children }) {
   const { user, company, logout } = useAuth();
   const nav = useNavigate();
-  const items = NAV.filter(n => n.roles.includes(user?.role) || user?.is_super_admin);
+  const superOnly = user?.is_super_admin && !company;
+  const items = superOnly ? [] : NAV.filter(n => n.roles.includes(user?.role) || user?.is_super_admin);
+  const homeUrl = superOnly ? "/admin" : "/dashboard";
 
   return (
     <div className="min-h-screen flex bg-background">
       <aside className="w-64 border-r border-border bg-card hidden md:flex flex-col">
         <div className="p-5 border-b border-border">
-          <div className="flex items-center gap-2 cursor-pointer" onClick={()=>nav("/dashboard")}>
+          <div className="flex items-center gap-2 cursor-pointer" onClick={()=>nav(homeUrl)}>
             <Leaf size={26} weight="fill" className="text-primary" />
             <span className="font-display font-bold text-lg">KarbonKu</span>
           </div>
-          <div className="mt-3 text-xs uppercase tracking-wider text-muted-foreground">Perusahaan</div>
-          <div className="font-semibold truncate" data-testid="sidebar-company-name">{company?.name}</div>
+          {superOnly ? (
+            <>
+              <div className="mt-3 text-xs uppercase tracking-wider text-muted-foreground">Mode</div>
+              <div className="font-semibold truncate flex items-center gap-1 text-primary" data-testid="sidebar-super-mode"><Shield size={14}/> Super Admin Global</div>
+            </>
+          ) : (
+            <>
+              <div className="mt-3 text-xs uppercase tracking-wider text-muted-foreground">Perusahaan</div>
+              <div className="font-semibold truncate" data-testid="sidebar-company-name">{company?.name}</div>
+            </>
+          )}
         </div>
         <nav className="flex-1 py-3 overflow-y-auto">
           {items.map(item => (

@@ -25,7 +25,8 @@ export default function AuthCallback() {
         const { data } = await api.post("/auth/session", { session_id: sessionId });
         window.history.replaceState(null, "", "/");
         const info = await refresh();
-        if (info?.company) navigate("/dashboard", { replace: true });
+        if (info?.user?.is_super_admin) navigate("/admin", { replace: true });
+        else if (info?.company) navigate("/dashboard", { replace: true });
         else navigate("/signup-company", { replace: true });
       } catch (e) {
         toast.error("Gagal masuk. Silakan coba lagi.");

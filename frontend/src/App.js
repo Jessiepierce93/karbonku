@@ -30,7 +30,15 @@ function RequireCompany({ children }) {
   const { user, company, loading } = useAuth();
   if (loading) return <div className="min-h-screen flex items-center justify-center text-muted-foreground">Memuat...</div>;
   if (!user) return <Navigate to="/" replace />;
-  if (!company) return <Navigate to="/signup-company" replace />;
+  if (!company && !user.is_super_admin) return <Navigate to="/signup-company" replace />;
+  return <AppLayout>{children}</AppLayout>;
+}
+
+function RequireSuper({ children }) {
+  const { user, loading } = useAuth();
+  if (loading) return <div className="min-h-screen flex items-center justify-center text-muted-foreground">Memuat...</div>;
+  if (!user) return <Navigate to="/" replace />;
+  if (!user.is_super_admin) return <Navigate to="/dashboard" replace />;
   return <AppLayout>{children}</AppLayout>;
 }
 
@@ -53,10 +61,10 @@ function AppRouter() {
       <Route path="/laporan" element={<RequireCompany><Reports /></RequireCompany>} />
       <Route path="/pengguna" element={<RequireCompany><UserManagement /></RequireCompany>} />
       <Route path="/audit" element={<RequireCompany><AuditLogs /></RequireCompany>} />
-      <Route path="/admin" element={<RequireCompany><AdminDashboard /></RequireCompany>} />
-      <Route path="/admin/companies/:cid" element={<RequireCompany><AdminCompanyDetail /></RequireCompany>} />
-      <Route path="/admin/master" element={<RequireCompany><AdminMaster /></RequireCompany>} />
-      <Route path="/admin/audit" element={<RequireCompany><AdminAudit /></RequireCompany>} />
+      <Route path="/admin" element={<RequireSuper><AdminDashboard /></RequireSuper>} />
+      <Route path="/admin/companies/:cid" element={<RequireSuper><AdminCompanyDetail /></RequireSuper>} />
+      <Route path="/admin/master" element={<RequireSuper><AdminMaster /></RequireSuper>} />
+      <Route path="/admin/audit" element={<RequireSuper><AdminAudit /></RequireSuper>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
