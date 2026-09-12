@@ -1,0 +1,120 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Work+Sans:wght@400;500;600;700;800&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+
+body {
+    margin: 0;
+    font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    background: hsl(var(--background));
+    color: hsl(var(--foreground));
+}
+
+h1, h2, h3, h4, h5, h6, .font-display {
+    font-family: 'Work Sans', sans-serif;
+    letter-spacing: -0.01em;
+}
+
+@layer base {
+    :root {
+        --background: 40 24% 97%;
+        --foreground: 24 9% 10%;
+        --card: 0 0% 100%;
+        --card-foreground: 24 9% 10%;
+        --popover: 0 0% 100%;
+        --popover-foreground: 24 9% 10%;
+        --primary: 152 43% 15%;
+        --primary-foreground: 0 0% 100%;
+        --secondary: 160 12% 40%;
+        --secondary-foreground: 0 0% 100%;
+        --muted: 220 14% 96%;
+        --muted-foreground: 220 9% 46%;
+        --accent: 199 65% 73%;
+        --accent-foreground: 24 9% 10%;
+        --destructive: 12 62% 63%;
+        --destructive-foreground: 0 0% 100%;
+        --border: 0 0% 90%;
+        --input: 0 0% 90%;
+        --ring: 152 43% 15%;
+        --chart-1: 12 62% 63%;
+        --chart-2: 199 65% 73%;
+        --chart-3: 160 12% 40%;
+        --chart-4: 43 74% 66%;
+        --chart-5: 152 43% 25%;
+        --scope1: 12 62% 63%;
+        --scope2: 199 65% 73%;
+        --scope3: 160 12% 40%;
+        --radius: 0.5rem;
+    }
+    .dark {
+        --background: 150 8% 8%;
+        --foreground: 210 20% 98%;
+        --card: 150 7% 12%;
+        --card-foreground: 210 20% 98%;
+        --popover: 150 7% 12%;
+        --popover-foreground: 210 20% 98%;
+        --primary: 141 43% 71%;
+        --primary-foreground: 152 43% 8%;
+        --secondary: 160 12% 40%;
+        --secondary-foreground: 210 20% 98%;
+        --muted: 150 8% 14%;
+        --muted-foreground: 150 5% 65%;
+        --accent: 197 66% 47%;
+        --accent-foreground: 210 20% 98%;
+        --destructive: 10 79% 82%;
+        --destructive-foreground: 210 20% 98%;
+        --border: 150 7% 18%;
+        --input: 150 7% 18%;
+        --ring: 141 43% 71%;
+        --chart-1: 10 79% 82%;
+        --chart-2: 184 40% 76%;
+        --chart-3: 152 23% 65%;
+        --chart-4: 43 74% 66%;
+        --chart-5: 141 43% 71%;
+    }
+}
+
+@layer base {
+    * { @apply border-border; }
+    body { @apply bg-background text-foreground; }
+}
+
+.marketing-hero {
+    background:
+      radial-gradient(1200px 500px at 90% -10%, hsla(199,65%,73%,0.25), transparent 60%),
+      radial-gradient(800px 400px at 0% 100%, hsla(152,43%,15%,0.08), transparent 60%),
+      hsl(var(--background));
+}
+
+.scope-1-bg { background-color: hsl(var(--scope1) / 0.12); }
+.scope-2-bg { background-color: hsl(var(--scope2) / 0.15); }
+.scope-3-bg { background-color: hsl(var(--scope3) / 0.15); }
+.scope-1-text { color: hsl(var(--scope1)); }
+.scope-2-text { color: hsl(199 65% 45%); }
+.scope-3-text { color: hsl(var(--scope3)); }
+
+.card-flat {
+    background: hsl(var(--card));
+    border: 1px solid hsl(var(--border));
+    border-radius: 4px;
+    transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+.card-flat:hover { border-color: hsl(var(--primary) / 0.4); }
+
+@layer base {
+    [data-debug-wrapper="true"] { display: contents !important; }
+    [data-debug-wrapper="true"] > * {
+        margin-left: inherit; margin-right: inherit; margin-top: inherit; margin-bottom: inherit;
+        padding-left: inherit; padding-right: inherit; padding-top: inherit; padding-bottom: inherit;
+        column-gap: inherit; row-gap: inherit; gap: inherit;
+        border-left-width: inherit; border-right-width: inherit;
+        border-top-width: inherit; border-bottom-width: inherit;
+        border-left-style: inherit; border-right-style: inherit;
+        border-top-style: inherit; border-bottom-style: inherit;
+        border-left-color: inherit; border-right-color: inherit;
+        border-top-color: inherit; border-bottom-color: inherit;
+    }
+}

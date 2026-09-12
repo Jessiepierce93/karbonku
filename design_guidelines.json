@@ -1,0 +1,137 @@
+{
+  "theme": {
+    "mode": "system",
+    "default": "light",
+    "description": "Hybrid application. Light mode emphasizes corporate trust and physical paper/reports. Dark mode is sleek for prolonged dashboard usage, emphasizing energy saving."
+  },
+  "typography": {
+    "fonts": {
+      "headings": {
+        "family": "'Work Sans', sans-serif",
+        "weights": ["400", "600", "700"],
+        "usage": "All H1-H6 tags, widget titles, and hero text. Never use Inter for headings."
+      },
+      "body": {
+        "family": "'IBM Plex Sans', sans-serif",
+        "weights": ["400", "500"],
+        "usage": "Paragraphs, labels, table data, and general UI text."
+      }
+    },
+    "hierarchy": {
+      "h1": "text-4xl sm:text-5xl lg:text-6xl tracking-tight leading-none",
+      "h2": "text-2xl sm:text-3xl lg:text-4xl tracking-tight",
+      "h3": "text-xl sm:text-2xl tracking-tight",
+      "h4": "text-lg sm:text-xl font-semibold",
+      "body": "text-base leading-relaxed",
+      "small": "text-sm text-muted-foreground",
+      "overline": "text-xs font-bold uppercase tracking-[0.2em]"
+    }
+  },
+  "colors": {
+    "archetype": "Organic & Earthy (Trust, Growth, Calm)",
+    "light": {
+      "background": "#f9f8f6",
+      "foreground": "#1c1917",
+      "card": "#ffffff",
+      "card_border": "#e5e5e5",
+      "primary": "#1b4332",
+      "primary_foreground": "#ffffff",
+      "secondary": "#52796f",
+      "muted": "#f3f4f6",
+      "accent": "#8ecae6",
+      "destructive": "#e07a5f",
+      "scope1": "#e07a5f",
+      "scope2": "#8ecae6",
+      "scope3": "#52796f"
+    },
+    "dark": {
+      "background": "#121614",
+      "foreground": "#f8f9fa",
+      "card": "#1b201d",
+      "card_border": "#2d3732",
+      "primary": "#95d5b2",
+      "primary_foreground": "#081c15",
+      "secondary": "#52796f",
+      "muted": "#1e2924",
+      "accent": "#219ebc",
+      "destructive": "#ffb4a2",
+      "scope1": "#ffb4a2",
+      "scope2": "#a8dadc",
+      "scope3": "#81b29a"
+    }
+  },
+  "layouts": {
+    "marketing": {
+      "strategy": "The 'Tetris' Grid (Mode A)",
+      "spacing": "Generous (p-12, p-24, gap-12)",
+      "nav": "Crystal Glassmorphism (backdrop-blur-xl bg-white/70 dark:bg-black/60) with 1px bottom border.",
+      "hero": "Asymmetrical layout. Large bold 'Work Sans' typography with nature/industrial imagery blending via soft masking, not heavy black overlays."
+    },
+    "dashboard": {
+      "strategy": "High Density Grid (Mode B) + Collapsible Sidebar",
+      "spacing": "Tight (gap-4, p-6)",
+      "cards": "Flat solid surfaces with sharp edges or subtle 4px radius. 1px solid border. Avoid heavy drop shadows. Cardless where possible for data tables.",
+      "f_pattern": "Place 'Carbon Intensity (kgCO2e/kWh)' as the North Star metric in top-left."
+    }
+  },
+  "visual_enhancers": {
+    "surfaces": {
+      "headers": "Glassmorphism with backdrop-saturate-150 and delicate 1px inner stroke.",
+      "dashboard_widgets": "Neumorphism mix: flat background matching parent, 1px subtle border, sharp inner contrasts.",
+      "grid_borders": "Use border-collapse style layouts for master data tables."
+    },
+    "icons": {
+      "library": "@phosphor-icons/react",
+      "style": "Duotone for marketing, Regular/Bold for dashboard clarity."
+    }
+  },
+  "components": {
+    "forms": "Shadcn UI (Input, Select, Checkbox) heavily customized with sharp borders. Always use Shadcn Form.",
+    "tables": "Shadcn UI Table. Dense padding, hover row highlights.",
+    "charts": "Shadcn UI Charts (Recharts). Use Scope-specific colors (Scope 1: Terracotta, Scope 2: Sky Blue, Scope 3: Moss Green).",
+    "date_picker": "Shadcn Calendar (react-day-picker).",
+    "toasts": "Sonner (bottom-right positioning)."
+  },
+  "motion": {
+    "marketing": "Use framer-motion for scroll-triggered staggered entrances. Smooth scrolling with Lenis.",
+    "dashboard": "Minimal. Hover states on rows, active states on sidebar links, subtle scale down (0.98) on button click.",
+    "accessibility": "Respect prefers-reduced-motion media query."
+  },
+  "media": {
+    "images": [
+      {
+        "url": "https://images.unsplash.com/photo-1600481017849-4e1c1346ea2f?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA3MDB8MHwxfHNlYXJjaHw0fHxpbmRvbmVzaWElMjBqYWthcnRhJTIwc2t5bGluZXxlbnwwfHx8fDE3ODc3NTE2MDV8MA&ixlib=rb-4.1.0&q=85",
+        "category": "hero_background",
+        "description": "Jakarta skyline. Use for marketing hero or onboarding background."
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1509391366360-2e959784a276?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1ODF8MHwxfHNlYXJjaHwxfHxzb2xhciUyMHBhbmVscyUyMGNsZWFuJTIwZW5lcmd5fGVufDB8fHx8MTc4Nzc1MTYwNXww&ixlib=rb-4.1.0&q=85",
+        "category": "scope_2_education",
+        "description": "Solar panels on green field. Use in educational content for Scope 2 (Electricity/Steam)."
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1695222833131-54ee679ae8e5?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzV8MHwxfHNlYXJjaHwzfHxjYXJnbyUyMHRydWNrJTIwbG9naXN0aWNzfGVufDB8fHx8MTc4Nzc1MTYwNXww&ixlib=rb-4.1.0&q=85",
+        "category": "scope_3_education",
+        "description": "Logistics cargo truck. Use in educational content for Scope 3 (Value Chain)."
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1675116731363-c17d957f3444?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA5NTd8MHwxfHNlYXJjaHwyfHx3aW5kJTIwdHVyYmluZSUyMGdyZWVuJTIwbGFuZHNjYXBlfGVufDB8fHx8MTc4Nzc1MTYwNXww&ixlib=rb-4.1.0&q=85",
+        "category": "general_sustainability",
+        "description": "Wind turbines in green landscape. Use for public calculator or decarbonization roadmap UI."
+      }
+    ],
+    "guidelines": "Never use placeholders. Use provided images. Max image height 80vh on mobile."
+  },
+  "instructions_to_main_agent": [
+    "Install Google Fonts 'Work Sans' and 'IBM Plex Sans' in index.html or via CSS @import.",
+    "Install required packages: `yarn add @phosphor-icons/react framer-motion recharts sonner`.",
+    "Do not center-align the main App container in App.css.",
+    "Override tailwind.config.js with the provided colors (Organic & Earthy). Ensure CSS variables map correctly.",
+    "Use standard semantic HTML with Tailwind for the marketing landing page (no Shadcn layout components).",
+    "Use Shadcn UI extensively for the SaaS dashboard (Tables, Forms, Charts).",
+    "Add `data-testid` to all interactive elements (e.g., `data-testid=\"login-button\"`).",
+    "Ensure minimum 4.5:1 text contrast. Do not use fully transparent backgrounds behind text.",
+    "Implement the 'Carbon Intensity' North Star metric prominently in the dashboard.",
+    "Add transition for hover states on all buttons and cards, excluding transforms from universal transitions."
+  ]
+}

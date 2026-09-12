@@ -1,0 +1,38 @@
+{
+  "summary": "Backend testing for KarbonKu completed. 40 pytest cases across auth, public calculator, meta, company update, facilities/assets CRUD, emission logs (create/anti-duplicate/approve/reject/role-guards), dashboard stats, reports (CSV/PDF), AI recommendations (Gemini via Emergent LLM), user management, audit logs, and all super-admin global endpoints (stats, companies, review, master data CRUD for factors/regions/types, audit-logs, access control). Initial run: 39 passed, 1 failed on /api/admin/audit-logs (500 - ObjectId serialization). RCA: create_company inserted a doc into audit_logs.meta which motor mutated with _id from a preceding companies.insert_one; the meta._id ObjectId then broke JSON serialization on the global audit-logs listing. Fixed by popping _id before audit(); cleaned residual document. Re-run: all 40 tests pass (100%).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/companies (create_company)", "issue": "Missing doc.pop('_id') before audit() caused ObjectId to leak into audit_logs.meta and 500 on /api/admin/audit-logs — FIXED in this iteration."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_karbonku.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "None blocking. Recommend a general audit helper that strips ObjectId/non-serializable fields defensively (defense-in-depth), since several endpoints rely on manual doc.pop('_id') before audit()."
+  ],
+  "critical_code_review_comments": [
+    "server.py is a single 861-line file — consider splitting into modules (auth, companies, emissions, admin, reports) as it grows past 700 lines.",
+    "audit() stores arbitrary meta dicts; add a sanitizer to strip _id/ObjectId to prevent recurrences of the fixed bug.",
+    "dashboard_stats indexes by_scope with int keys (1,2,3); JSON serializes them to strings so frontends must handle string keys.",
+    "list_factors post-filters region in Python instead of Mongo query; small perf concern.",
+    "startup uses deprecated @app.on_event('startup'); consider FastAPI lifespan.",
+    "public/calculate does not validate scope/category combination against a known enum — attackers can probe factor catalog; consider rate limiting.",
+    "reject_emission uses raw dict payload instead of Pydantic model — minor consistency issue.",
+    "role_update allows changing the last admin's role away from admin (no guard) — could lock a company out."
+  ],
+  "updated_files": [
+    "/app/backend/server.py (added doc.pop('_id') after companies.insert_one)",
+    "/app/backend/tests/test_karbonku.py (new)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "not tested"},
+  "test_credentials": "Session tokens from /app/memory/test_credentials.md used: test_session_karbon_super_1, test_session_karbon_admin_1, test_session_karbon_staff_1, test_session_karbon_sup_1.",
+  "seed_data_creation": "Test facility (TEST_Facility_A) and emission logs for 2026 months 1-3 created via API for company co_test_karbon_1. Admin factor/region/type master items were created and deleted within tests. Company employees updated to 120 and annual_production 5000 for intensity calc.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "All 40 backend tests currently pass. Test file at /app/backend/tests/test_karbonku.py can be re-run as regression. If seed data changes, some tests (e.g., duplicate-409 in 2026-01) may need month bumps. AI test hits real Gemini and takes ~10s.",
+  "rca of the issue": "Bug: /api/admin/audit-logs returned 500 — ValueError: 'ObjectId' object is not iterable. Reproduction: create a company via POST /api/companies, then call GET /api/admin/audit-logs. RCA: in create_company, the local `doc` was passed to db.companies.insert_one(doc) which motor mutates to attach an ObjectId `_id`. That same mutated dict was then passed to audit(...) as `meta`, embedding the ObjectId inside audit_logs. On listing, jsonable_encoder failed to serialize the nested ObjectId. Mitigation: pop '_id' from doc before audit() (matches the pattern already used in create_facility/asset/emission). Applied fix to server.py and cleaned the polluted record with $unset meta._id."
+}
