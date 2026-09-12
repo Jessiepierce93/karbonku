@@ -3,7 +3,7 @@ from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
-import os, logging, uuid, io, csv, requests
+import os, logging, uuid, io, csv, httpx
 from pathlib import Path
 from pydantic import BaseModel, Field, EmailStr
 from typing import List, Optional, Literal
@@ -17,6 +17,9 @@ client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY')
 SUPER_ADMIN_EMAIL = os.environ.get('SUPER_ADMIN_EMAIL', '').lower()
+EMERGENT_EMAIL_KEY = os.environ.get('EMERGENT_EMAIL_KEY', '')
+EMAIL_FROM_NAME = os.environ.get('EMAIL_FROM_NAME', 'KarbonKu')
+EMAIL_BASE_URL = "https://integrations.emergentagent.com"
 
 app = FastAPI()
 api = APIRouter(prefix="/api")
@@ -26,6 +29,80 @@ def now_utc():
 
 def iso(dt):
     return dt.isoformat() if isinstance(dt, datetime) else dt
+
+# ============ EMAIL (Emergent Resend) ============
+import re, ipaddress
+from html import escape
+from html.parser import HTMLParser
+from urllib.parse import urlparse
+
+_SHORTENERS = ("bit.ly","tinyurl.com","t.co","is.gd","cutt.ly","goo.gl","rebrand.ly")
+_CRED_ASK = ("reply with your password","reply with the code","send your password","cvv",
+             "send us your password","enter your password below","confirm your card number",
+             "your full card number","seed phrase","recovery phrase","verify your card",
+             "social security number","confirm your bank details")
+_HOSTISH = re.compile(r"\b(?:https?://)?((?:[a-z0-9-]+\.)+[a-z]{2,})", re.I)
+
+def _host_ok(h):
+    if not h or "xn--" in h: return False
+    try: ipaddress.ip_address(h); return False
+    except ValueError: pass
+    return not any(h==s or h.endswith("."+s) for s in _SHORTENERS)
+
+def _same_site(a, b): return a==b or b.endswith("."+a) or a.endswith("."+b)
+
+class _EmailScan(HTMLParser):
+    def __init__(self):
+        super().__init__(); self.tags,self.urls,self.anchors=set(),[],[]
+        self._href,self._text=None,[]
+    def handle_starttag(self,tag,attrs):
+        self.tags.add(tag.lower())
+        self.urls += [v for k,v in attrs if k.lower() in ("href","src") and v]
+        if tag.lower()=="a":
+            self._href=dict((k.lower(),v) for k,v in attrs).get("href"); self._text=[]
+    def handle_data(self,data):
+        if self._href is not None: self._text.append(data)
+    def handle_endtag(self,tag):
+        if tag.lower()=="a" and self._href is not None:
+            self.anchors.append((self._href,"".join(self._text))); self._href,self._text=None,[]
+
+def _assert_safe_email(subject, html):
+    s = _EmailScan(); s.feed(html)
+    if s.tags & {"form","input","textarea","select"}:
+        raise ValueError("No forms/input in email (G2)")
+    body = f"{subject}\n{html}".lower()
+    for p in _CRED_ASK:
+        if p in body: raise ValueError(f"Email asks for credential: {p!r}")
+    for url in s.urls:
+        low = url.strip().lower()
+        if low.startswith(("mailto:","tel:","cid:","#")): continue
+        if not low.startswith("https://"):
+            raise ValueError(f"Non-https link/asset: {url!r}")
+        host = urlparse(low).hostname or ""
+        if not _host_ok(host) or urlparse(low).username is not None:
+            raise ValueError(f"Unsafe host: {url!r}")
+    for href,text in s.anchors:
+        real = urlparse(href.strip().lower()).hostname or ""
+        if not real: continue
+        for m in _HOSTISH.finditer(text):
+            if not _same_site(m.group(1).lower(), real):
+                raise ValueError(f"Anchor host mismatch: {m.group(1)!r} vs {real!r}")
+
+async def send_email(to: str, subject: str, html: str):
+    if not EMERGENT_EMAIL_KEY:
+        logging.warning("EMERGENT_EMAIL_KEY not set — skipping email to %s", to)
+        return None
+    _assert_safe_email(subject, html)
+    payload = {"to":[to], "subject":subject, "html":html, "from_name": EMAIL_FROM_NAME}
+    try:
+        async with httpx.AsyncClient(timeout=30) as hc:
+            r = await hc.post(f"{EMAIL_BASE_URL}/api/v1/email/send",
+                              headers={"X-Email-Key": EMERGENT_EMAIL_KEY}, json=payload)
+            r.raise_for_status()
+            return r.json().get("id")
+    except Exception as e:
+        logging.error("Email failed: %s", e)
+        return None
 
 # ============ MODELS ============
 class Company(BaseModel):
@@ -188,12 +265,13 @@ async def create_session(payload: dict, response: Response):
     if not session_id:
         raise HTTPException(400, "session_id required")
     try:
-        r = requests.get(
-            "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data",
-            headers={"X-Session-ID": session_id}, timeout=10
-        )
-        r.raise_for_status()
-        data = r.json()
+        async with httpx.AsyncClient(timeout=10) as hc:
+            r = await hc.get(
+                "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data",
+                headers={"X-Session-ID": session_id}
+            )
+            r.raise_for_status()
+            data = r.json()
     except Exception as e:
         raise HTTPException(401, f"OAuth verification failed: {e}")
     email = data["email"].lower()
@@ -207,12 +285,25 @@ async def create_session(payload: dict, response: Response):
         updates = {"name": name, "picture": picture}
         if email == SUPER_ADMIN_EMAIL and not existing.get("is_super_admin"):
             updates["is_super_admin"] = True
+        # Consume pending invite if user has no company yet
+        if not existing.get("company_id"):
+            invite = await db.pending_invites.find_one({"email": email})
+            if invite:
+                updates["company_id"] = invite["company_id"]
+                updates["role"] = invite.get("role","staff")
+                await db.pending_invites.delete_many({"email": email})
         await db.users.update_one({"user_id": user_id}, {"$set": updates})
     else:
         user_id = f"user_{uuid.uuid4().hex[:12]}"
+        # Consume pending invite for brand-new user
+        invite = await db.pending_invites.find_one({"email": email})
+        company_id = invite["company_id"] if invite else None
+        role = invite.get("role","staff") if invite else "admin"
+        if invite:
+            await db.pending_invites.delete_many({"email": email})
         await db.users.insert_one({
             "user_id": user_id, "email": email, "name": name, "picture": picture,
-            "company_id": None, "role": "admin",
+            "company_id": company_id, "role": role,
             "is_super_admin": email == SUPER_ADMIN_EMAIL,
             "created_at": iso(now_utc())
         })
@@ -307,12 +398,18 @@ async def create_facility(payload: FacilityIn, user: User = Depends(require_comp
 
 @api.put("/facilities/{fid}")
 async def update_facility(fid: str, payload: FacilityIn, user: User = Depends(require_company)):
-    await db.facilities.update_one({"facility_id": fid, "company_id": user.company_id}, {"$set": payload.model_dump()})
-    return await db.facilities.find_one({"facility_id": fid},{"_id":0})
+    r = await db.facilities.update_one({"facility_id": fid, "company_id": user.company_id}, {"$set": payload.model_dump()})
+    if r.matched_count == 0:
+        raise HTTPException(404, "Fasilitas tidak ditemukan")
+    await audit(user.user_id, user.company_id, "facility.update", {"facility_id": fid, **payload.model_dump()})
+    return await db.facilities.find_one({"facility_id": fid, "company_id": user.company_id}, {"_id":0})
 
 @api.delete("/facilities/{fid}")
 async def delete_facility(fid: str, user: User = Depends(require_company)):
-    await db.facilities.delete_one({"facility_id": fid, "company_id": user.company_id})
+    r = await db.facilities.delete_one({"facility_id": fid, "company_id": user.company_id})
+    if r.deleted_count == 0:
+        raise HTTPException(404, "Fasilitas tidak ditemukan")
+    await audit(user.user_id, user.company_id, "facility.delete", {"facility_id": fid})
     return {"ok": True}
 
 # ============ ASSETS ============
@@ -332,11 +429,15 @@ async def create_asset(payload: AssetIn, user: User = Depends(require_company)):
            **payload.model_dump(), "created_at": iso(now_utc())}
     await db.assets.insert_one(doc)
     doc.pop("_id", None)
+    await audit(user.user_id, user.company_id, "asset.create", doc)
     return doc
 
 @api.delete("/assets/{aid}")
 async def delete_asset(aid: str, user: User = Depends(require_company)):
-    await db.assets.delete_one({"asset_id": aid, "company_id": user.company_id})
+    r = await db.assets.delete_one({"asset_id": aid, "company_id": user.company_id})
+    if r.deleted_count == 0:
+        raise HTTPException(404, "Aset tidak ditemukan")
+    await audit(user.user_id, user.company_id, "asset.delete", {"asset_id": aid})
     return {"ok": True}
 
 # ============ EMISSION FACTORS & REGIONS ============
@@ -412,6 +513,33 @@ async def create_emission(payload: EmissionIn, user: User = Depends(require_comp
     await db.emission_logs.insert_one(log)
     log.pop("_id", None)
     await audit(user.user_id, user.company_id, "emission.create", {"log_id": log["log_id"], "total": log["total_kg_co2e"]})
+    # Notify supervisors (fire-and-forget)
+    company = await db.companies.find_one({"company_id": user.company_id}, {"_id":0})
+    facility = await db.facilities.find_one({"facility_id": payload.facility_id}, {"_id":0})
+    supers = await db.users.find({"company_id": user.company_id, "role": "supervisor"}, {"_id":0}).to_list(50)
+    if supers and EMERGENT_EMAIL_KEY:
+        app_url = os.environ.get("APP_URL","").rstrip("/") or "https://karbon-tracker-1.preview.emergentagent.com"
+        subject = f"[KarbonKu] Draft emisi baru menunggu persetujuan — {company['name']}"
+        body = f"""<table role="presentation" width="100%" style="max-width:560px;margin:0 auto;font-family:Arial,sans-serif;color:#1c1917">
+<tr><td style="padding:24px;background:#1b4332;color:#fff;border-radius:6px 6px 0 0">
+<h2 style="margin:0;font-size:20px">Draft Emisi Baru</h2>
+<p style="margin:4px 0 0;font-size:13px;opacity:0.85">KarbonKu · Inventarisasi GRK</p></td></tr>
+<tr><td style="padding:24px;background:#fafaf9;border:1px solid #e7e5e4;border-top:0;border-radius:0 0 6px 6px">
+<p>Halo,</p>
+<p><strong>{escape(user.name)}</strong> telah menginput data emisi baru yang menunggu persetujuan Anda:</p>
+<table role="presentation" width="100%" style="border-collapse:collapse;margin:12px 0">
+<tr><td style="padding:8px;background:#f5f5f4;border:1px solid #e7e5e4"><b>Perusahaan</b></td><td style="padding:8px;border:1px solid #e7e5e4">{escape(company['name'])}</td></tr>
+<tr><td style="padding:8px;background:#f5f5f4;border:1px solid #e7e5e4"><b>Fasilitas</b></td><td style="padding:8px;border:1px solid #e7e5e4">{escape(facility['name']) if facility else '-'}</td></tr>
+<tr><td style="padding:8px;background:#f5f5f4;border:1px solid #e7e5e4"><b>Scope / Kategori</b></td><td style="padding:8px;border:1px solid #e7e5e4">Scope {log['scope']} — {escape(log['category'])}</td></tr>
+<tr><td style="padding:8px;background:#f5f5f4;border:1px solid #e7e5e4"><b>Periode</b></td><td style="padding:8px;border:1px solid #e7e5e4">{log['period_month']}/{log['period_year']}</td></tr>
+<tr><td style="padding:8px;background:#f5f5f4;border:1px solid #e7e5e4"><b>Total Emisi</b></td><td style="padding:8px;border:1px solid #e7e5e4">{log['total_kg_co2e']:,.2f} kg CO2e</td></tr>
+</table>
+<p style="margin-top:16px"><a href="{app_url}/persetujuan" style="display:inline-block;padding:10px 18px;background:#1b4332;color:#fff;text-decoration:none;border-radius:4px">Tinjau di KarbonKu</a></p>
+<p style="font-size:12px;color:#78716c;margin-top:24px">Email otomatis dari KarbonKu. Kami tidak pernah meminta password atau data kartu melalui email.</p>
+</td></tr></table>"""
+        for s in supers:
+            try: await send_email(s["email"], subject, body)
+            except Exception: pass
     return log
 
 @api.post("/emissions/{lid}/approve")
@@ -447,7 +575,10 @@ async def reject_emission(lid: str, payload: dict, user: User = Depends(require_
 async def delete_emission(lid: str, user: User = Depends(require_company)):
     if user.role == "supervisor":
         raise HTTPException(403, "Tidak diizinkan")
-    await db.emission_logs.delete_one({"log_id": lid, "company_id": user.company_id, "status":"draft"})
+    r = await db.emission_logs.delete_one({"log_id": lid, "company_id": user.company_id, "status":"draft"})
+    if r.deleted_count == 0:
+        raise HTTPException(404, "Log tidak ditemukan atau tidak dapat dihapus")
+    await audit(user.user_id, user.company_id, "emission.delete", {"log_id": lid})
     return {"ok": True}
 
 # ============ DASHBOARD ============
@@ -507,17 +638,21 @@ async def invite_user(payload: dict, user: User = Depends(require_company)):
     role = payload.get("role","staff")
     if not email:
         raise HTTPException(400, "Email required")
+    if role not in ("admin","staff","supervisor"):
+        raise HTTPException(400, "Invalid role")
     existing = await db.users.find_one({"email": email})
     if existing:
         if existing.get("company_id"):
             raise HTTPException(409, "Pengguna sudah terdaftar di perusahaan lain")
         await db.users.update_one({"email":email}, {"$set":{"company_id": user.company_id, "role": role}})
+        await audit(user.user_id, user.company_id, "user.invite_accepted", {"email": email, "role": role})
     else:
         await db.pending_invites.update_one(
             {"email": email, "company_id": user.company_id},
             {"$set":{"email":email,"company_id":user.company_id,"role":role,"created_at":iso(now_utc())}},
             upsert=True
         )
+        await audit(user.user_id, user.company_id, "user.invite_pending", {"email": email, "role": role})
     return {"ok": True, "message": "Undangan tersimpan. Pengguna akan otomatis bergabung saat sign-in dengan email tersebut."}
 
 # ============ AUDIT ============
@@ -630,6 +765,64 @@ async def report_pdf(year: Optional[int]=None, user: User = Depends(require_comp
     buf.seek(0)
     return Response(content=buf.read(), media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="laporan_karbon_{year}.pdf"'})
+
+@api.get("/reports/certificate")
+async def report_certificate(year: Optional[int]=None, user: User = Depends(require_company)):
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    from reportlab.lib.units import cm
+    from reportlab.lib.enums import TA_CENTER
+    year = year or now_utc().year
+    stats = await dashboard_stats(year=year, user=user)
+    company = await db.companies.find_one({"company_id": user.company_id},{"_id":0})
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=landscape(A4), topMargin=1.5*cm, bottomMargin=1.5*cm, leftMargin=2*cm, rightMargin=2*cm)
+    styles = getSampleStyleSheet()
+    forest = colors.HexColor('#1b4332')
+    sand = colors.HexColor('#f5f0e6')
+    center_h1 = ParagraphStyle('h1', parent=styles['Title'], textColor=forest, fontSize=32, alignment=TA_CENTER, spaceAfter=6)
+    center_sub = ParagraphStyle('sub', parent=styles['Normal'], textColor=colors.HexColor('#52796f'), fontSize=11, alignment=TA_CENTER, spaceAfter=20)
+    center_big = ParagraphStyle('big', parent=styles['Normal'], textColor=forest, fontSize=56, alignment=TA_CENTER, spaceAfter=6, fontName='Helvetica-Bold')
+    center_body = ParagraphStyle('body', parent=styles['Normal'], fontSize=13, alignment=TA_CENTER, spaceAfter=12)
+    story = []
+    story.append(Spacer(1, 0.3*cm))
+    story.append(Paragraph("SERTIFIKAT INVENTARISASI KARBON", center_h1))
+    story.append(Paragraph("KarbonKu — GHG Protocol · ISO 14064-1 · GRI 305", center_sub))
+    story.append(Spacer(1, 0.4*cm))
+    story.append(Paragraph("Diberikan kepada", center_body))
+    story.append(Paragraph(f"<b>{escape(company['name'])}</b>", ParagraphStyle('co', parent=styles['Normal'], fontSize=22, alignment=TA_CENTER, textColor=forest, spaceAfter=14)))
+    story.append(Paragraph(f"atas pencatatan & pelaporan emisi GRK periode <b>{year}</b>", center_body))
+    story.append(Spacer(1, 0.6*cm))
+    tot = stats['total_tco2e']
+    story.append(Paragraph(f"{tot:,.2f}".replace(",","."), center_big))
+    story.append(Paragraph("tonnes CO<sub>2</sub>e (Total Emisi Terverifikasi)", center_body))
+    story.append(Spacer(1, 0.4*cm))
+    scope_row = [["Scope 1 (Langsung)", "Scope 2 (Energi)", "Scope 3 (Rantai Nilai)"],
+                 [f"{stats['by_scope_kg'][1]/1000:,.3f} tCO2e",
+                  f"{stats['by_scope_kg'][2]/1000:,.3f} tCO2e",
+                  f"{stats['by_scope_kg'][3]/1000:,.3f} tCO2e"]]
+    t = Table(scope_row, colWidths=[7*cm]*3)
+    t.setStyle(TableStyle([
+        ('BACKGROUND',(0,0),(-1,0), sand),
+        ('TEXTCOLOR',(0,0),(-1,0), forest),
+        ('ALIGN',(0,0),(-1,-1),'CENTER'),
+        ('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),
+        ('FONTSIZE',(0,0),(-1,-1), 11),
+        ('BOX',(0,0),(-1,-1), 0.75, forest),
+        ('INNERGRID',(0,0),(-1,-1), 0.5, forest),
+        ('TOPPADDING',(0,0),(-1,-1), 10),
+        ('BOTTOMPADDING',(0,0),(-1,-1), 10),
+    ]))
+    story.append(t)
+    story.append(Spacer(1, 0.7*cm))
+    story.append(Paragraph(f"Diterbitkan pada {now_utc().strftime('%d %B %Y')} · Ref: {user.company_id[-8:].upper()}-{year}",
+                           ParagraphStyle('foot', parent=styles['Normal'], fontSize=9, alignment=TA_CENTER, textColor=colors.HexColor('#78716c'))))
+    doc.build(story)
+    buf.seek(0)
+    return Response(content=buf.read(), media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="sertifikat_karbon_{year}.pdf"'})
 
 # ============ AI RECOMMENDATIONS ============
 @api.post("/ai/recommendations")
@@ -840,6 +1033,181 @@ async def admin_del_type(kind: str, key: str, user: User = Depends(require_super
 @api.get("/admin/audit-logs")
 async def admin_audit_logs(_: User = Depends(require_super)):
     return await db.audit_logs.find({},{"_id":0}).sort("created_at",-1).to_list(1000)
+
+# ============ SUPER ADMIN — Full Cross-Company CRUD ============
+class AdminCompanyIn(BaseModel):
+    name: str
+    industry: Optional[str] = None
+    size: Optional[str] = None
+    region: Optional[str] = "jamali"
+    org_boundary: Optional[str] = None
+    employees: Optional[int] = 0
+    annual_production: Optional[float] = 0
+
+@api.post("/admin/companies")
+async def admin_create_company(payload: AdminCompanyIn, user: User = Depends(require_super)):
+    company_id = f"co_{uuid.uuid4().hex[:12]}"
+    doc = {"company_id": company_id, **payload.model_dump(), "created_at": iso(now_utc())}
+    await db.companies.insert_one(doc)
+    doc.pop("_id", None)
+    await audit(user.user_id, company_id, "admin.company.create", doc)
+    return doc
+
+@api.put("/admin/companies/{cid}")
+async def admin_update_company(cid: str, payload: AdminCompanyIn, user: User = Depends(require_super)):
+    old = await db.companies.find_one({"company_id": cid},{"_id":0})
+    if not old: raise HTTPException(404, "Perusahaan tidak ditemukan")
+    updates = {k:v for k,v in payload.model_dump().items() if v is not None}
+    await db.companies.update_one({"company_id": cid}, {"$set": updates})
+    await audit(user.user_id, cid, "admin.company.update", {"old": old, "new": updates})
+    return await db.companies.find_one({"company_id": cid},{"_id":0})
+
+@api.delete("/admin/companies/{cid}")
+async def admin_delete_company(cid: str, user: User = Depends(require_super)):
+    old = await db.companies.find_one({"company_id": cid},{"_id":0})
+    if not old: raise HTTPException(404, "Perusahaan tidak ditemukan")
+    await db.companies.delete_one({"company_id": cid})
+    await db.facilities.delete_many({"company_id": cid})
+    await db.assets.delete_many({"company_id": cid})
+    await db.emission_logs.delete_many({"company_id": cid})
+    await db.users.update_many({"company_id": cid, "is_super_admin": {"$ne": True}}, {"$set":{"company_id": None}})
+    await audit(user.user_id, cid, "admin.company.delete", {"name": old.get("name")})
+    return {"ok": True}
+
+# --- Users cross-company ---
+class AdminUserIn(BaseModel):
+    email: EmailStr
+    name: str
+    role: str = "staff"
+
+@api.get("/admin/companies/{cid}/users")
+async def admin_company_users(cid: str, _: User = Depends(require_super)):
+    return await db.users.find({"company_id": cid},{"_id":0}).to_list(500)
+
+@api.post("/admin/companies/{cid}/users")
+async def admin_add_user(cid: str, payload: AdminUserIn, user: User = Depends(require_super)):
+    if payload.role not in ("admin","staff","supervisor"):
+        raise HTTPException(400, "Invalid role")
+    email = payload.email.lower()
+    existing = await db.users.find_one({"email": email})
+    if existing:
+        if existing.get("company_id") and existing["company_id"] != cid:
+            raise HTTPException(409, "Pengguna sudah terdaftar di perusahaan lain")
+        await db.users.update_one({"email": email}, {"$set":{"company_id": cid, "role": payload.role, "name": payload.name}})
+        uid = existing["user_id"]
+    else:
+        uid = f"user_{uuid.uuid4().hex[:12]}"
+        await db.users.insert_one({
+            "user_id": uid, "email": email, "name": payload.name, "picture": "",
+            "company_id": cid, "role": payload.role, "is_super_admin": False,
+            "created_at": iso(now_utc())
+        })
+    await audit(user.user_id, cid, "admin.user.add", {"email": email, "role": payload.role})
+    return await db.users.find_one({"user_id": uid},{"_id":0})
+
+class AdminUserUpdate(BaseModel):
+    name: Optional[str] = None
+    role: Optional[str] = None
+    company_id: Optional[str] = None
+
+@api.put("/admin/users/{uid}")
+async def admin_update_user(uid: str, payload: AdminUserUpdate, user: User = Depends(require_super)):
+    old = await db.users.find_one({"user_id": uid},{"_id":0})
+    if not old: raise HTTPException(404, "User tidak ditemukan")
+    if old.get("is_super_admin") and old["user_id"] != user.user_id:
+        raise HTTPException(403, "Tidak dapat mengubah Super Admin lain")
+    updates = {k:v for k,v in payload.model_dump().items() if v is not None}
+    if "role" in updates and updates["role"] not in ("admin","staff","supervisor"):
+        raise HTTPException(400, "Invalid role")
+    await db.users.update_one({"user_id": uid}, {"$set": updates})
+    await audit(user.user_id, updates.get("company_id", old.get("company_id","GLOBAL")), "admin.user.update", {"user_id": uid, "old": old, "new": updates})
+    return await db.users.find_one({"user_id": uid},{"_id":0})
+
+@api.delete("/admin/users/{uid}")
+async def admin_delete_user(uid: str, user: User = Depends(require_super)):
+    old = await db.users.find_one({"user_id": uid},{"_id":0})
+    if not old: raise HTTPException(404, "User tidak ditemukan")
+    if old.get("is_super_admin"):
+        raise HTTPException(403, "Tidak dapat menghapus Super Admin")
+    await db.users.delete_one({"user_id": uid})
+    await db.user_sessions.delete_many({"user_id": uid})
+    await audit(user.user_id, old.get("company_id","GLOBAL"), "admin.user.delete", {"user_id": uid, "email": old.get("email")})
+    return {"ok": True}
+
+# --- Facilities/Assets/Emissions cross-company ---
+@api.post("/admin/companies/{cid}/facilities")
+async def admin_add_facility(cid: str, payload: FacilityIn, user: User = Depends(require_super)):
+    doc = {"facility_id": f"fc_{uuid.uuid4().hex[:10]}", "company_id": cid,
+           **payload.model_dump(), "created_at": iso(now_utc())}
+    await db.facilities.insert_one(doc); doc.pop("_id", None)
+    await audit(user.user_id, cid, "admin.facility.create", doc)
+    return doc
+
+@api.put("/admin/facilities/{fid}")
+async def admin_update_facility(fid: str, payload: FacilityIn, user: User = Depends(require_super)):
+    old = await db.facilities.find_one({"facility_id": fid},{"_id":0})
+    if not old: raise HTTPException(404, "Fasilitas tidak ditemukan")
+    await db.facilities.update_one({"facility_id": fid}, {"$set": payload.model_dump()})
+    await audit(user.user_id, old["company_id"], "admin.facility.update", {"facility_id": fid, "old": old, "new": payload.model_dump()})
+    return await db.facilities.find_one({"facility_id": fid},{"_id":0})
+
+@api.delete("/admin/facilities/{fid}")
+async def admin_delete_facility(fid: str, user: User = Depends(require_super)):
+    old = await db.facilities.find_one({"facility_id": fid},{"_id":0})
+    if not old: raise HTTPException(404, "Fasilitas tidak ditemukan")
+    await db.facilities.delete_one({"facility_id": fid})
+    await audit(user.user_id, old["company_id"], "admin.facility.delete", {"facility_id": fid})
+    return {"ok": True}
+
+@api.get("/admin/companies/{cid}/assets")
+async def admin_list_assets(cid: str, _: User = Depends(require_super)):
+    return await db.assets.find({"company_id": cid},{"_id":0}).to_list(1000)
+
+@api.post("/admin/companies/{cid}/assets")
+async def admin_add_asset(cid: str, payload: AssetIn, user: User = Depends(require_super)):
+    doc = {"asset_id": f"as_{uuid.uuid4().hex[:10]}", "company_id": cid,
+           **payload.model_dump(), "created_at": iso(now_utc())}
+    await db.assets.insert_one(doc); doc.pop("_id", None)
+    await audit(user.user_id, cid, "admin.asset.create", doc)
+    return doc
+
+@api.delete("/admin/assets/{aid}")
+async def admin_delete_asset(aid: str, user: User = Depends(require_super)):
+    old = await db.assets.find_one({"asset_id": aid},{"_id":0})
+    if not old: raise HTTPException(404, "Aset tidak ditemukan")
+    await db.assets.delete_one({"asset_id": aid})
+    await audit(user.user_id, old["company_id"], "admin.asset.delete", {"asset_id": aid})
+    return {"ok": True}
+
+class AdminEmissionUpdate(BaseModel):
+    activity_data: Optional[float] = None
+    period_year: Optional[int] = None
+    period_month: Optional[int] = None
+    notes: Optional[str] = None
+
+@api.put("/admin/emissions/{lid}")
+async def admin_update_emission(lid: str, payload: AdminEmissionUpdate, user: User = Depends(require_super)):
+    old = await db.emission_logs.find_one({"log_id": lid},{"_id":0})
+    if not old: raise HTTPException(404, "Log tidak ditemukan")
+    updates = {k:v for k,v in payload.model_dump().items() if v is not None}
+    if "activity_data" in updates:
+        factor_val = old["factor_value"]; gwp = old.get("gwp",1.0)
+        if old["category"].startswith("refrigerant"):
+            total = updates["activity_data"] * factor_val
+        else:
+            total = updates["activity_data"] * factor_val * gwp
+        updates["total_kg_co2e"] = round(total,4)
+    await db.emission_logs.update_one({"log_id": lid}, {"$set": updates})
+    await audit(user.user_id, old["company_id"], "admin.emission.update", {"log_id": lid, "old": old, "new": updates})
+    return await db.emission_logs.find_one({"log_id": lid},{"_id":0})
+
+@api.delete("/admin/emissions/{lid}")
+async def admin_delete_emission(lid: str, user: User = Depends(require_super)):
+    old = await db.emission_logs.find_one({"log_id": lid},{"_id":0})
+    if not old: raise HTTPException(404, "Log tidak ditemukan")
+    await db.emission_logs.delete_one({"log_id": lid})
+    await audit(user.user_id, old["company_id"], "admin.emission.delete", {"log_id": lid})
+    return {"ok": True}
 
 # ============ HEALTH ============
 @api.get("/")

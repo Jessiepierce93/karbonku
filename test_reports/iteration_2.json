@@ -1,0 +1,25 @@
+{
+  "summary": "Iteration 2 backend testing complete. All 33 new tests + 40 iteration-1 regression tests pass (73/73 = 100%). Verified: Bug A (facility cross-tenant leak fixed — PUT returns 404), Bug B (pending invite recorded), Bug D (PDF export works), Bug E (auth/session endpoint imports cleanly and responds 400/401 on bad payload), Certificate PDF endpoint (returns application/pdf with sertifikat_karbon_{year}.pdf disposition), Email wiring (create_emission succeeds with EMERGENT_EMAIL_KEY empty — no 500, silently skips), Super Admin full CRUD on companies (create/update/list/delete+cascade + non-super 403), Super Admin Users CRUD (add/list/update-role/move-across-company/delete + cannot delete another super admin + non-super 403), Super Admin Facilities/Assets CRUD across companies (+ non-super 403), Super Admin Emissions edit (recomputes total_kg_co2e correctly: 200*2.31*1.0=462) and delete (+ non-super 403), Audit trail contains admin.company.create/update/delete, admin.user.add/update/delete, admin.facility.create/delete, admin.emission.update/delete.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter2_admin_crud.py",
+    "/app/backend/tests/test_karbonku.py",
+    "/app/test_reports/pytest/iter2_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is 1230 lines — consider splitting into modules (auth, companies, emissions, admin, reports) before it grows further.",
+    "Silent try/except pass for email sending in create_emission swallows all errors — OK for MVP but should at least log at WARNING to aid ops debugging.",
+    "admin_delete_user does not delete pending_invites for that email — leaves orphaned invite doc (minor).",
+    "admin_update_user allows moving user to any company_id string without validating existence of the target company (would allow orphan link).",
+    "PDF/certificate generation is synchronous inside async handler (reportlab is CPU-bound) — fine for MVP but consider run_in_executor for high concurrency."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter2_admin_crud.py"],
+  "success_rate": {"backend": "100%", "frontend": "not tested (backend-only request)"},
+  "test_credentials": "Using seeded session tokens from /app/memory/test_credentials.md (super/admin/staff/supervisor).",
+  "seed_data_creation": "Test data uses TEST_ITER2_ prefixes; created companies/users/facilities/assets/emissions are cleaned up within tests. One pending_invite for newbie.karbon@example.com is intentionally left (needed by feature spec).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 2 covers admin CRUD + certificate + email wiring — 100% pass. Next iteration can extend with frontend Playwright coverage of the Super Admin UI (company CRUD table, user manager modal, cross-company facility/asset editors, certificate download button)."
+}

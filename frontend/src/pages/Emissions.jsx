@@ -17,6 +17,7 @@ const STATUS_BADGE = {
   draft: { label: "Draft", variant: "outline" },
   approved: { label: "Disetujui", className: "bg-primary/15 text-primary border-primary/30" },
   rejected: { label: "Ditolak", variant: "destructive" },
+  flagged: { label: "Kekurangan", className: "bg-orange-100 text-orange-800 border-orange-300" },
 };
 
 export default function Emissions() {
@@ -135,7 +136,7 @@ export default function Emissions() {
           <TableBody>
             {logs.length===0 && <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground py-8">Belum ada log emisi</TableCell></TableRow>}
             {logs.map(l => {
-              const badge = STATUS_BADGE[l.status];
+              const badge = STATUS_BADGE[l.status] || { label: l.status, variant: "outline" };
               return (
                 <TableRow key={l.log_id}>
                   <TableCell>{monthNames[l.period_month]} {l.period_year}</TableCell>

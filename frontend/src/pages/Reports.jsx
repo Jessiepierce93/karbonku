@@ -12,13 +12,14 @@ export default function Reports() {
   const [loading, setLoading] = useState(false);
 
   const download = (type) => {
+    const filename = type === "certificate" ? `sertifikat_karbon_${year}.pdf` : `laporan_karbon_${year}.${type}`;
     const url = `${BACKEND_URL}/api/reports/${type}?year=${year}`;
     fetch(url, { credentials: "include" })
       .then(r => { if (!r.ok) throw new Error("Gagal"); return r.blob(); })
       .then(blob => {
         const a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
-        a.download = `laporan_karbon_${year}.${type}`;
+        a.download = filename;
         a.click();
       }).catch(() => toast.error("Gagal mengunduh"));
   };
@@ -54,10 +55,11 @@ export default function Reports() {
             </Select>
           </div>
         </div>
-        <p className="text-sm text-muted-foreground mb-4">Berisi rekapitulasi Scope 1/2/3, breakdown per fasilitas, dan intensitas karbon. Hanya mencakup entri berstatus <b>Disetujui</b>.</p>
+        <p className="text-sm text-muted-foreground mb-4">Berisi rekapitulasi Scope 1/2/3, breakdown per fasilitas, dan intensitas karbon. Hanya mencakup entri berstatus <b>Disetujui</b>. Sertifikat = ringkasan 1-halaman siap dibagikan (LinkedIn / klien).</p>
         <div className="flex gap-2">
           <Button onClick={()=>download("csv")} data-testid="export-csv-btn"><FileArrowDown size={16}/> Ekspor CSV</Button>
           <Button onClick={()=>download("pdf")} variant="outline" data-testid="export-pdf-btn"><FileArrowDown size={16}/> Ekspor PDF</Button>
+          <Button onClick={()=>download("certificate")} variant="outline" data-testid="export-cert-btn"><FileArrowDown size={16}/> Sertifikat Karbon</Button>
         </div>
       </Card>
 
